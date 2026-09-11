@@ -1,93 +1,131 @@
-; parser.asm - Parser Module
+; parser.asm - Parser Module (Multiple Statements Support)
 default rel
 
 %include "lib/mem.asm"
-
-; --- AST STRUCT DEFINITION ---
-NODE_FUNCTION_CALL  equ 1
-NODE_STRING_LITERAL equ 2
-
-struc ASTNode
-    .type:     resd 1    ; NODE_* constant
-    .pad:      resd 1    ; Alignment padding (8 bytes)
-    .val_ptr:  resq 1    ; Pointer to string in buffer
-    .val_len:  resq 1    ; String length
-    .arg_ptr:  resq 1    ; Pointer to child ASTNode
-endstruc
+%include "lib/ast.asm"
 
 section .bss
-    parser_arena: resb Arena_size  ; Instância estática da Arena para o parser
+    parser_arena: resb Arena_size
 
 section .text
     global parse_buffer
 
-; --- INTERFACE MACRO ---
 %macro PARSE_BUFFER 2
     mov rdi, %1          ; 1st argument: buffer pointer
     mov rsi, %2          ; 2nd argument: buffer size
-    call parse_buffer    ; Returns root ASTNode pointer in RAX
+    call parse_buffer    ; Returns head ASTNode pointer in RAX
 %endmacro
 
 parse_buffer:
     ; Input:  RDI = buffer_ptr, RSI = buffer_size
-    ; Output: RAX = pointer to root ASTNode
+    ; Output: RAX = pointer to head ASTNode
 
     push r12
     push r13
     push r14
     push r15
+    push rbx
 
-    mov r12, rdi         ; R12 = buffer_ptr
-    mov r13, rsi         ; R13 = buffer_size
+    mov r12, rdi         ; R12 = Current buffer position
+    mov r13, rsi         ; R13 = Remaining buffer bytes
 
-    ; --- 1. Lazy-init parser's own arena if not yet initialized ---
+    ; --- 1. Init Arena ---
     mov rax, [parser_arena + Arena.base]
     test rax, rax
-    jnz .parse_start
+    jnz .parse_init_vars
 
     lea rdi, [parser_arena]
     mov rsi, 65536       ; 64KB capacity
     call arena_init
 
-.parse_start:
-    ; --- 2. Allocate root node ---
+.parse_init_vars:
+    xor r14, r14         ; R14 = Head of AST list
+    xor r15, r15         ; R15 = Tail of AST list (for appending .next)
+
+.parse_loop:
+    cmp r13, 10          ; Minimum bytes needed for `println("")`
+    jl .parse_done
+
+    ; Check if buffer starts with "println(" (4 bytes "prin" + 2 bytes "tl" + "n(")
+    cmp dword [r12], "prin"
+    jne .advance_char
+    cmp word [r12 + 4], "tl"
+    jne .advance_char
+    cmp word [r12 + 6], "n("
+    jne .advance_char
+    cmp byte [r12 + 8], '"'
+    jne .advance_char
+
+    ; --- 2. Allocate Call Node ---
     lea rdi, [parser_arena]
     mov rsi, ASTNode_size
     call arena_alloc
-    mov r14, rax         ; R14 = root ASTNode
+    mov rbx, rax         ; RBX = New Call ASTNode
 
-    mov dword [r14 + ASTNode.type], NODE_FUNCTION_CALL
-    mov qword [r14 + ASTNode.val_ptr], r12
-    mov qword [r14 + ASTNode.val_len], 7   ; "println" (não usado no codegen atual)
+    ; Clear node memory (Crucial to zero .next!)
+    mov qword [rbx + ASTNode.type], NODE_FUNCTION_CALL
+    mov qword [rbx + ASTNode.val_ptr], 0
+    mov qword [rbx + ASTNode.val_len], 0
+    mov qword [rbx + ASTNode.arg_ptr], 0
+    mov qword [rbx + ASTNode.next], 0
 
-    ; --- 3. Allocate argument node ---
+    ; --- 3. Allocate String Argument Node ---
     lea rdi, [parser_arena]
     mov rsi, ASTNode_size
-    call arena_alloc     ; RAX = argument ASTNode
-    mov r15, rax          ; guarda o nó de argumento
+    call arena_alloc     ; RAX = New String ASTNode
 
-    mov dword [r15 + ASTNode.type], NODE_STRING_LITERAL
-    lea rbx, [r12 + 9]    ; Advance past 'println("'
-    mov qword [r15 + ASTNode.val_ptr], rbx
-    mov qword [r15 + ASTNode.arg_ptr], 0
+    mov qword [rax + ASTNode.type], NODE_STRING_LITERAL
+    mov qword [rax + ASTNode.arg_ptr], 0
+    mov qword [rax + ASTNode.next], 0
 
-    ; --- 3b. Scan até achar '"' de fechamento e calcular val_len de verdade ---
-    xor rcx, rcx          ; RCX = contador de caracteres
-.scan_loop:
-    movzx eax, byte [rbx + rcx]
-    cmp al, '"'
-    je .scan_done
-    cmp al, 0              ; proteção contra buffer sem aspa de fechamento
-    je .scan_done
+    ; Set string start past `println("`
+    lea r8, [r12 + 9]
+    mov qword [rax + ASTNode.val_ptr], r8
+
+    ; --- 4. Scan String Length until '"' ---
+    xor rcx, rcx
+.scan_str:
+    cmp rcx, r13
+    jge .str_done
+    movzx edx, byte [r8 + rcx]
+    cmp dl, '"'
+    je .str_done
+    cmp dl, 10           ; Stop on newline safety check
+    je .str_done
     inc rcx
-    jmp .scan_loop
-.scan_done:
-    mov qword [r15 + ASTNode.val_len], rcx
+    jmp .scan_str
 
-    ; --- 4. Link & Return ---
-    mov qword [r14 + ASTNode.arg_ptr], r15
-    mov rax, r14          ; Return root ASTNode in RAX
+.str_done:
+    mov qword [rax + ASTNode.val_len], rcx
+    mov qword [rbx + ASTNode.arg_ptr], rax ; Link argument to call node
 
+    ; --- 5. Append to AST Linked List ---
+    test r14, r14
+    jnz .append_node
+    mov r14, rbx         ; If head is null, set head = rbx
+    jmp .set_tail
+
+.append_node:
+    mov qword [r15 + ASTNode.next], rbx ; tail.next = rbx
+
+.set_tail:
+    mov r15, rbx         ; tail = rbx
+
+    ; Advance buffer past string + closing `")`
+    add rcx, 11          ; Length of `println("` (9) + `")` (2)
+    sub r13, rcx
+    add r12, rcx
+    jmp .parse_loop
+
+.advance_char:
+    inc r12
+    dec r13
+    jmp .parse_loop
+
+.parse_done:
+    mov rax, r14          ; Return head ASTNode in RAX
+
+    pop rbx
     pop r15
     pop r14
     pop r13
