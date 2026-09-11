@@ -1,0 +1,15 @@
+# Executables and raw binary files
+*.o
+*.obj
+*.bin
+*.out
+
+# Common assembly build files
+*.elf
+*.so
+*.a
+
+# Project output binaries (add your specific binary name if needed)
+main
+sys
+src/test
