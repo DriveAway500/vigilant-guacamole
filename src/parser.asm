@@ -35,6 +35,7 @@ parse_buffer:
     push r12
     push r13
     push r14
+    push r15
 
     mov r12, rdi         ; R12 = buffer_ptr
     mov r13, rsi         ; R13 = buffer_size
@@ -57,23 +58,37 @@ parse_buffer:
 
     mov dword [r14 + ASTNode.type], NODE_FUNCTION_CALL
     mov qword [r14 + ASTNode.val_ptr], r12
-    mov qword [r14 + ASTNode.val_len], 7
+    mov qword [r14 + ASTNode.val_len], 7   ; "println" (não usado no codegen atual)
 
     ; --- 3. Allocate argument node ---
     lea rdi, [parser_arena]
     mov rsi, ASTNode_size
     call arena_alloc     ; RAX = argument ASTNode
+    mov r15, rax          ; guarda o nó de argumento
 
-    mov dword [rax + ASTNode.type], NODE_STRING_LITERAL
-    lea rbx, [r12 + 9]   ; Advance past 'println("'
-    mov qword [rax + ASTNode.val_ptr], rbx
-    mov qword [rax + ASTNode.val_len], 9
-    mov qword [rax + ASTNode.arg_ptr], 0
+    mov dword [r15 + ASTNode.type], NODE_STRING_LITERAL
+    lea rbx, [r12 + 9]    ; Advance past 'println("'
+    mov qword [r15 + ASTNode.val_ptr], rbx
+    mov qword [r15 + ASTNode.arg_ptr], 0
+
+    ; --- 3b. Scan até achar '"' de fechamento e calcular val_len de verdade ---
+    xor rcx, rcx          ; RCX = contador de caracteres
+.scan_loop:
+    movzx eax, byte [rbx + rcx]
+    cmp al, '"'
+    je .scan_done
+    cmp al, 0              ; proteção contra buffer sem aspa de fechamento
+    je .scan_done
+    inc rcx
+    jmp .scan_loop
+.scan_done:
+    mov qword [r15 + ASTNode.val_len], rcx
 
     ; --- 4. Link & Return ---
-    mov qword [r14 + ASTNode.arg_ptr], rax
-    mov rax, r14         ; Return root ASTNode in RAX
+    mov qword [r14 + ASTNode.arg_ptr], r15
+    mov rax, r14          ; Return root ASTNode in RAX
 
+    pop r15
     pop r14
     pop r13
     pop r12

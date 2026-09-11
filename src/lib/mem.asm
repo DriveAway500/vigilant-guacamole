@@ -1,4 +1,7 @@
-; lib/mem.s - Generic Arena Allocator Module
+%ifndef MEM_ASM
+%define MEM_ASM
+
+; lib/mem.asm - Generic Arena Allocator Module
 default rel
 
 struc Arena
@@ -55,3 +58,5 @@ arena_alloc:
     add rsi, rax                 ; Calculate new free offset
     mov [rdi + Arena.next], rsi  ; Update Arena.next
     ret                          ; Return allocated block pointer in RAX
+
+%endif 

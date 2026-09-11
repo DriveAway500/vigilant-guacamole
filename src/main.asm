@@ -3,6 +3,7 @@ default rel
 %include "lib/sys.asm"
 %include "lib/file.asm"
 %include "parser.asm"
+%include "codegen.asm"
 
 section .bss
     input_buf resb 64
@@ -47,5 +48,11 @@ _start:
     ; 6. Parse the file content loaded in memory
     PARSE_BUFFER file_buf, r12    ; RAX contains the root ASTNode pointer
 
-    ; 7. Exit process with code 0
+    ; 7. Generate target assembly file
+    mov rdi, rax                  ; RDI = root ASTNode pointer
+    call generate_assembly_file
+
+    println "Output written to output.asm"
+
+    ; 8. Exit process with code 0
     exit 0

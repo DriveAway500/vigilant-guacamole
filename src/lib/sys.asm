@@ -1,3 +1,6 @@
+%ifndef SYS_ASM
+%define SYS_ASM
+
 ; ==============================================================================
 ; SYSTEM UTILITY MACROS & IMPLEMENTATION
 ; ==============================================================================
@@ -8,6 +11,7 @@
 
 ; Usage 1 (Literal string):  println "Hello World"
 ; Usage 2 (Buffer pointer):  println msg_ptr, msg_len
+
 %macro println 1
     section .rodata
         %%str db %1, 0xA, 0
@@ -58,8 +62,6 @@
 ; -----------------------------------------------------------------------------
 ; FUNCTION IMPLEMENTATIONS (Guarded against double inclusion)
 ; -----------------------------------------------------------------------------
-%ifndef SYS_IMPL_DONE
-%define SYS_IMPL_DONE
 
 section .text
 
