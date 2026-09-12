@@ -1,5 +1,6 @@
 import os
 
+
 def write_file(filepath: str, content: str) -> None:
     """Writes content to a file, creating parent directories if necessary."""
     output_dir = os.path.dirname(filepath)
@@ -17,3 +18,15 @@ def read_file(filepath: str) -> str:
 
     with open(filepath, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def get_base_name(filepath: str) -> str:
+    """Strips the file extension from the path, returning the base path."""
+    base_name, _ = os.path.splitext(filepath)
+    return base_name
+
+
+def remove_file(filepath: str) -> None:
+    """Removes a file from the system if it exists."""
+    if os.path.exists(filepath):
+        os.remove(filepath)
