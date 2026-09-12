@@ -46,7 +46,9 @@ _start:
     close_file [fd_res]
 
     ; 6. Parse the file content loaded in memory
-    PARSE_BUFFER file_buf, r12    ; RAX contains the root ASTNode pointer
+    mov rdi, file_buf             ; Arg 1: Buffer address
+    mov rsi, r12                  ; Arg 2: Buffer length
+    call parse_buffer             ; RAX contains the root ASTNode pointer
 
     ; 7. Generate target assembly file
     mov rdi, rax                  ; RDI = root ASTNode pointer
