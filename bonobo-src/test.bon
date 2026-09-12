@@ -1,11 +1,10 @@
-let int a = 10;
-let int b = 20;
-let int c = 5;
+let int i = 0;
+let bool running = true;
 
-if (a + b > c * 1) {
-    let int result = a + b + c;
-    println("yes");
-    println(result);
-} else {
-    println("no");
+while (running) {
+    println(i);
+    i = i + 1;
+    if (i == 5) {
+        running = false;
+    }
 }

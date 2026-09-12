@@ -8,13 +8,16 @@ from lib import (
     asm_println,
     asm_data_string,
     asm_data_int,
+    asm_data_bool,
     asm_data_var_string,
     asm_print_var_str,
     asm_push_num,
+    asm_push_bool,
     asm_push_var,
     asm_store_var,
     asm_binop,
     asm_cmp_and_jump,
+    asm_test_bool_and_jump,
     asm_jump,
     asm_label,
     asm_print_expr_int,
@@ -23,11 +26,14 @@ from parser import (
     ASTNode,
     PrintlnNode,
     VarDeclNode,
+    AssignNode,
     BinaryOpNode,
     NumberNode,
+    BoolNode,
     StringNode,
     VarRefNode,
     IfNode,
+    WhileNode,
     BlockNode,
 )
 
@@ -66,6 +72,10 @@ class CodeGenerator:
         self.text_section.append(asm_push_num(node.value))
         return "int"
 
+    def visit_BoolNode(self, node: BoolNode) -> str:
+        self.text_section.append(asm_push_bool(node.value))
+        return "bool"
+
     def visit_StringNode(self, node: StringNode) -> str:
         return "str"
 
@@ -74,7 +84,7 @@ class CodeGenerator:
             raise NameError(f"Variable '{node.name}' is not defined.")
 
         var_type = self.symbol_table[node.name]
-        if var_type == "int":
+        if var_type in ("int", "bool"):
             self.text_section.append(asm_push_var(node.name))
 
         return var_type
@@ -90,7 +100,11 @@ class CodeGenerator:
 
         if node.op in ("+", "-", "*", "/"):
             self.text_section.append(asm_binop(node.op))
-        return "int"
+            return "int"
+        elif node.op in (">", "<", ">=", "<=", "==", "!="):
+            return "bool"
+        
+        raise ValueError(f"Unsupported binary operator: '{node.op}'")
 
     # -------------------------------------------------------------------------
     # Statement Visitors
@@ -100,23 +114,26 @@ class CodeGenerator:
         for stmt in node.statements:
             self.visit(stmt)
 
+    def _generate_condition_check(self, condition_node: ASTNode, false_label: str) -> None:
+        if isinstance(condition_node, BinaryOpNode) and condition_node.op in (">", "<", ">=", "<=", "==", "!="):
+            self.visit(condition_node.left)
+            self.visit(condition_node.right)
+            self.text_section.append(asm_cmp_and_jump(condition_node.op, false_label))
+        else:
+            cond_type = self.visit(condition_node)
+            if cond_type != "bool":
+                raise TypeError(f"Condition must evaluate to boolean, got '{cond_type}'")
+            self.text_section.append(asm_test_bool_and_jump(false_label))
+
     def visit_IfNode(self, node: IfNode) -> None:
         label_id = self.label_count
         self.label_count += 1
 
         else_label = f".L_else_{label_id}"
         end_label = f".L_end_if_{label_id}"
+        target_label = else_label if node.else_branch else end_label
 
-        # Evaluate condition
-        if isinstance(node.condition, BinaryOpNode) and node.condition.op in (">", "<", ">=", "<=", "==", "!="):
-            self.visit(node.condition.left)
-            self.visit(node.condition.right)
-            target_label = else_label if node.else_branch else end_label
-            self.text_section.append(asm_cmp_and_jump(node.condition.op, target_label))
-        else:
-            raise SyntaxError("Condition in 'if' statement must be a comparison operation.")
-
-        # Then branch
+        self._generate_condition_check(node.condition, target_label)
         self.visit(node.then_branch)
 
         if node.else_branch:
@@ -124,6 +141,19 @@ class CodeGenerator:
             self.text_section.append(asm_label(else_label))
             self.visit(node.else_branch)
 
+        self.text_section.append(asm_label(end_label))
+
+    def visit_WhileNode(self, node: WhileNode) -> None:
+        label_id = self.label_count
+        self.label_count += 1
+
+        start_label = f".L_while_start_{label_id}"
+        end_label = f".L_while_end_{label_id}"
+
+        self.text_section.append(asm_label(start_label))
+        self._generate_condition_check(node.condition, end_label)
+        self.visit(node.body)
+        self.text_section.append(asm_jump(start_label))
         self.text_section.append(asm_label(end_label))
 
     def visit_PrintlnNode(self, node: PrintlnNode) -> None:
@@ -161,8 +191,16 @@ class CodeGenerator:
                 raise TypeError(
                     f"Cannot assign type '{expr_type}' to variable '{node.name}' of type 'int'"
                 )
-
             self.data_section.append(asm_data_int(node.name, 0))
+            self.text_section.append(asm_store_var(node.name))
+
+        elif node.var_type == "bool":
+            expr_type = self.visit(node.value)
+            if expr_type != "bool":
+                raise TypeError(
+                    f"Cannot assign type '{expr_type}' to variable '{node.name}' of type 'bool'"
+                )
+            self.data_section.append(asm_data_bool(node.name, False))
             self.text_section.append(asm_store_var(node.name))
 
         elif node.var_type == "str":
@@ -177,6 +215,20 @@ class CodeGenerator:
 
         else:
             raise NotImplementedError(f"Unsupported variable type: '{node.var_type}'")
+
+    def visit_AssignNode(self, node: AssignNode) -> None:
+        if node.name not in self.symbol_table:
+            raise NameError(f"Variable '{node.name}' is not defined.")
+
+        var_type = self.symbol_table[node.name]
+        expr_type = self.visit(node.value)
+
+        if var_type != expr_type:
+            raise TypeError(
+                f"Cannot assign type '{expr_type}' to variable '{node.name}' of type '{var_type}'"
+            )
+
+        self.text_section.append(asm_store_var(node.name))
 
     def _build_assembly(self) -> str:
         if self.needs_int_helper:

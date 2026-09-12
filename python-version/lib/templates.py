@@ -24,6 +24,10 @@ def asm_data_string(label_msg: str, label_len: str, text: str) -> str:
 def asm_data_int(var_name: str, value: int) -> str:
     return f'    var_{var_name} dq {value}'
 
+def asm_data_bool(var_name: str, value: bool) -> str:
+    val = 1 if value else 0
+    return f'    var_{var_name} dq {val}'
+
 def asm_data_var_string(var_name: str, text: str) -> str:
     return f'    var_{var_name} db "{text}", 10\n    len_var_{var_name} equ $ - var_{var_name}'
 
@@ -37,6 +41,11 @@ def asm_print_var_str(var_name: str) -> str:
 
 def asm_push_num(value: int) -> str:
     return f"""    mov rax, {value}
+    push rax"""
+
+def asm_push_bool(value: bool) -> str:
+    val = 1 if value else 0
+    return f"""    mov rax, {val}
     push rax"""
 
 def asm_push_var(var_name: str) -> str:
@@ -89,6 +98,11 @@ def asm_cmp_and_jump(op: str, label_false: str) -> str:
     pop rax
     cmp rax, rbx
     {jcc} {label_false}"""
+
+def asm_test_bool_and_jump(label_false: str) -> str:
+    return f"""    pop rax
+    test rax, rax
+    jz {label_false}"""
 
 def asm_jump(label: str) -> str:
     return f"    jmp {label}"

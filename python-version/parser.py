@@ -18,6 +18,14 @@ class NumberNode(ASTNode):
         return f"NumberNode(value={self.value})"
 
 
+class BoolNode(ASTNode):
+    def __init__(self, value: bool):
+        self.value = value
+
+    def __repr__(self):
+        return f"BoolNode(value={self.value})"
+
+
 class StringNode(ASTNode):
     def __init__(self, value: str):
         self.value = value
@@ -62,6 +70,15 @@ class VarDeclNode(ASTNode):
         return f"VarDeclNode(type={self.var_type!r}, name={self.name!r}, value={self.value})"
 
 
+class AssignNode(ASTNode):
+    def __init__(self, name: str, value: ASTNode):
+        self.name = name
+        self.value = value
+
+    def __repr__(self):
+        return f"AssignNode(name={self.name!r}, value={self.value})"
+
+
 class BlockNode(ASTNode):
     def __init__(self, statements: List[ASTNode]):
         self.statements = statements
@@ -78,6 +95,15 @@ class IfNode(ASTNode):
 
     def __repr__(self):
         return f"IfNode(condition={self.condition}, then={self.then_branch}, else={self.else_branch})"
+
+
+class WhileNode(ASTNode):
+    def __init__(self, condition: ASTNode, body: BlockNode):
+        self.condition = condition
+        self.body = body
+
+    def __repr__(self):
+        return f"WhileNode(condition={self.condition}, body={self.body})"
 
 
 # -------------------------------------------------------------------------
@@ -110,9 +136,10 @@ class Parser:
         self.tokens = tokens
         self.pos = 0
 
-    def peek(self) -> Token:
-        if self.pos < len(self.tokens):
-            return self.tokens[self.pos]
+    def peek(self, offset: int = 0) -> Token:
+        idx = self.pos + offset
+        if idx < len(self.tokens):
+            return self.tokens[idx]
         return Token("EOF", "")
 
     def consume(self, expected_type: str) -> Token:
@@ -136,6 +163,10 @@ class Parser:
             return self.parse_var_decl()
         elif current_type == "IF":
             return self.parse_if()
+        elif current_type == "WHILE":
+            return self.parse_while()
+        elif current_type == "IDENT" and self.peek(1).type == "ASSIGN":
+            return self.parse_assign()
         else:
             raise SyntaxError(f"Unexpected token: {self.peek()}")
 
@@ -162,12 +193,34 @@ class Parser:
 
         return IfNode(condition, then_branch, else_branch)
 
+    def parse_while(self) -> WhileNode:
+        self.consume("WHILE")
+        self.consume("LPAREN")
+        condition = self.parse_expr()
+        self.consume("RPAREN")
+
+        body = self.parse_block()
+        return WhileNode(condition, body)
+
+    def parse_assign(self) -> AssignNode:
+        name_token = self.consume("IDENT")
+        self.consume("ASSIGN")
+        value_expr = self.parse_expr()
+        self.consume("SEMI")
+        return AssignNode(name_token.value, value_expr)
+
     def parse_primary(self) -> ASTNode:
         token = self.peek()
 
         if token.type == "NUMBER":
             self.consume("NUMBER")
             return NumberNode(int(token.value))
+        elif token.type == "TRUE":
+            self.consume("TRUE")
+            return BoolNode(True)
+        elif token.type == "FALSE":
+            self.consume("FALSE")
+            return BoolNode(False)
         elif token.type == "STRING":
             self.consume("STRING")
             return StringNode(token.value)
@@ -225,7 +278,7 @@ class Parser:
         self.consume("LET")
 
         type_token = self.peek()
-        if type_token.type not in ("INT_TYPE", "STR_TYPE", "IDENT"):
+        if type_token.type not in ("INT_TYPE", "STR_TYPE", "BOOL_TYPE", "IDENT"):
             raise SyntaxError(f"Expected type identifier, got {type_token.type}")
         self.pos += 1
 
