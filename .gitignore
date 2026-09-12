@@ -12,5 +12,5 @@
 # Project output binaries (add your specific binary name if needed)
 bon
 sys
-src/test
-src/bonoutput
+test
+bonoutput
