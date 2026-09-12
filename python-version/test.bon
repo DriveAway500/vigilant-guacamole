@@ -1,8 +1,0 @@
-println("hello from bonobo");
-println("top 2 hellos ever");
-println("top 3 hellos ever");
-println("top 4 hellos ever");
-let int x = 10;
-let str b = "wtf";
-println(x);
-println(b);

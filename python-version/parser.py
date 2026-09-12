@@ -1,5 +1,5 @@
 import re
-from typing import List
+from typing import List, Optional
 from lib import Token, TOKEN_SPECIFICATION
 
 
@@ -10,38 +10,81 @@ class ASTNode:
     pass
 
 
-class PrintlnNode(ASTNode):
-    """AST node representing a println instruction with a string literal or variable."""
-
-    def __init__(self, value: str, is_var: bool = False):
+class NumberNode(ASTNode):
+    def __init__(self, value: int):
         self.value = value
-        self.is_var = is_var
 
     def __repr__(self):
-        return f"PrintlnNode(value={self.value!r}, is_var={self.is_var})"
+        return f"NumberNode(value={self.value})"
+
+
+class StringNode(ASTNode):
+    def __init__(self, value: str):
+        self.value = value
+
+    def __repr__(self):
+        return f"StringNode(value={self.value!r})"
+
+
+class VarRefNode(ASTNode):
+    def __init__(self, name: str):
+        self.name = name
+
+    def __repr__(self):
+        return f"VarRefNode(name={self.name!r})"
+
+
+class BinaryOpNode(ASTNode):
+    def __init__(self, left: ASTNode, op: str, right: ASTNode):
+        self.left = left
+        self.op = op
+        self.right = right
+
+    def __repr__(self):
+        return f"BinaryOpNode(left={self.left}, op={self.op!r}, right={self.right})"
+
+
+class PrintlnNode(ASTNode):
+    def __init__(self, expression: ASTNode):
+        self.expression = expression
+
+    def __repr__(self):
+        return f"PrintlnNode(expression={self.expression})"
 
 
 class VarDeclNode(ASTNode):
-    """AST node representing variable declaration (let <type> <var_name> = <val>;)."""
-
-    def __init__(self, var_type: str, name: str, value: str):
+    def __init__(self, var_type: str, name: str, value: ASTNode):
         self.var_type = var_type
         self.name = name
         self.value = value
 
     def __repr__(self):
-        return (
-            f"VarDeclNode(type={self.var_type!r}, name={self.name!r}, value={self.value!r})"
-        )
+        return f"VarDeclNode(type={self.var_type!r}, name={self.name!r}, value={self.value})"
+
+
+class BlockNode(ASTNode):
+    def __init__(self, statements: List[ASTNode]):
+        self.statements = statements
+
+    def __repr__(self):
+        return f"BlockNode(statements={self.statements})"
+
+
+class IfNode(ASTNode):
+    def __init__(self, condition: ASTNode, then_branch: BlockNode, else_branch: Optional[BlockNode] = None):
+        self.condition = condition
+        self.then_branch = then_branch
+        self.else_branch = else_branch
+
+    def __repr__(self):
+        return f"IfNode(condition={self.condition}, then={self.then_branch}, else={self.else_branch})"
 
 
 # -------------------------------------------------------------------------
 # Tokenizer (Lexer)
 # -------------------------------------------------------------------------
 def lexer(code: str) -> List[Token]:
-    tok_regex = "|".join(
-        f"(?P<{pair[0]}>{pair[1]})" for pair in TOKEN_SPECIFICATION
-    )
+    tok_regex = "|".join(f"(?P<{pair[0]}>{pair[1]})" for pair in TOKEN_SPECIFICATION)
     tokens = []
 
     for mo in re.finditer(tok_regex, code):
@@ -52,7 +95,6 @@ def lexer(code: str) -> List[Token]:
         elif kind == "MISMATCH":
             raise RuntimeError(f"Unexpected character: {value}")
 
-        # Remove quotation marks from string literals
         if kind == "STRING":
             value = value[1:-1]
 
@@ -81,34 +123,103 @@ class Parser:
         return token
 
     def parse(self) -> List[ASTNode]:
-        ast = []
+        statements = []
         while self.peek().type != "EOF":
-            current_type = self.peek().type
-            if current_type == "PRINTLN":
-                ast.append(self.parse_println())
-            elif current_type == "LET":
-                ast.append(self.parse_var_decl())
-            else:
-                raise SyntaxError(f"Unexpected token: {self.peek()}")
-        return ast
+            statements.append(self.parse_statement())
+        return statements
+
+    def parse_statement(self) -> ASTNode:
+        current_type = self.peek().type
+        if current_type == "PRINTLN":
+            return self.parse_println()
+        elif current_type == "LET":
+            return self.parse_var_decl()
+        elif current_type == "IF":
+            return self.parse_if()
+        else:
+            raise SyntaxError(f"Unexpected token: {self.peek()}")
+
+    def parse_block(self) -> BlockNode:
+        self.consume("LBRACE")
+        statements = []
+        while self.peek().type != "RBRACE" and self.peek().type != "EOF":
+            statements.append(self.parse_statement())
+        self.consume("RBRACE")
+        return BlockNode(statements)
+
+    def parse_if(self) -> IfNode:
+        self.consume("IF")
+        self.consume("LPAREN")
+        condition = self.parse_expr()
+        self.consume("RPAREN")
+
+        then_branch = self.parse_block()
+        else_branch = None
+
+        if self.peek().type == "ELSE":
+            self.consume("ELSE")
+            else_branch = self.parse_block()
+
+        return IfNode(condition, then_branch, else_branch)
+
+    def parse_primary(self) -> ASTNode:
+        token = self.peek()
+
+        if token.type == "NUMBER":
+            self.consume("NUMBER")
+            return NumberNode(int(token.value))
+        elif token.type == "STRING":
+            self.consume("STRING")
+            return StringNode(token.value)
+        elif token.type == "IDENT":
+            self.consume("IDENT")
+            return VarRefNode(token.value)
+        elif token.type == "LPAREN":
+            self.consume("LPAREN")
+            expr = self.parse_expr()
+            self.consume("RPAREN")
+            return expr
+
+        raise SyntaxError(f"Unexpected token in expression: {token}")
+
+    def parse_term(self) -> ASTNode:
+        left = self.parse_primary()
+
+        while self.peek().type in ("MUL", "DIV"):
+            op_token = self.consume(self.peek().type)
+            right = self.parse_primary()
+            left = BinaryOpNode(left, op_token.value, right)
+
+        return left
+
+    def parse_arithmetic(self) -> ASTNode:
+        left = self.parse_term()
+
+        while self.peek().type in ("PLUS", "MINUS"):
+            op_token = self.consume(self.peek().type)
+            right = self.parse_term()
+            left = BinaryOpNode(left, op_token.value, right)
+
+        return left
+
+    def parse_expr(self) -> ASTNode:
+        left = self.parse_arithmetic()
+
+        rel_ops = ("EQ", "NEQ", "LT", "GT", "LE", "GE")
+        if self.peek().type in rel_ops:
+            op_token = self.consume(self.peek().type)
+            right = self.parse_arithmetic()
+            left = BinaryOpNode(left, op_token.value, right)
+
+        return left
 
     def parse_println(self) -> PrintlnNode:
         self.consume("PRINTLN")
         self.consume("LPAREN")
-
-        arg_token = self.peek()
-        if arg_token.type == "STRING":
-            self.consume("STRING")
-            is_var = False
-        elif arg_token.type == "IDENT":
-            self.consume("IDENT")
-            is_var = True
-        else:
-            raise SyntaxError(f"Expected STRING or IDENT, got {arg_token.type}")
-
+        expr = self.parse_expr()
         self.consume("RPAREN")
         self.consume("SEMI")
-        return PrintlnNode(arg_token.value, is_var=is_var)
+        return PrintlnNode(expr)
 
     def parse_var_decl(self) -> VarDeclNode:
         self.consume("LET")
@@ -120,11 +231,7 @@ class Parser:
 
         name_token = self.consume("IDENT")
         self.consume("ASSIGN")
-
-        val_token = self.peek()
-        if val_token.type not in ("STRING", "NUMBER"):
-            raise SyntaxError(f"Expected value literal, got {val_token.type}")
-        self.pos += 1
-
+        value_expr = self.parse_expr()
         self.consume("SEMI")
-        return VarDeclNode(type_token.value, name_token.value, val_token.value)
+
+        return VarDeclNode(type_token.value, name_token.value, value_expr)

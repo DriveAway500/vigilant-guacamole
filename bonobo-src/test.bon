@@ -1,0 +1,11 @@
+let int a = 10;
+let int b = 20;
+let int c = 5;
+
+if (a + b > c * 1) {
+    let int result = a + b + c;
+    println("yes");
+    println(result);
+} else {
+    println("no");
+}
